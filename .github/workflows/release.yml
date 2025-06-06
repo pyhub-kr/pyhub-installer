@@ -1,0 +1,116 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run tests
+        run: make test
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+
+  build:
+    needs: release
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            binary_name: pyhub-installer
+            asset_name: pyhub-installer-linux-amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            binary_name: pyhub-installer
+            asset_name: pyhub-installer-linux-arm64
+          
+          # macOS builds
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            binary_name: pyhub-installer
+            asset_name: pyhub-installer-darwin-amd64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            binary_name: pyhub-installer
+            asset_name: pyhub-installer-darwin-arm64
+          
+          # Windows builds
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            binary_name: pyhub-installer.exe
+            asset_name: pyhub-installer-windows-amd64.exe
+
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -v -ldflags "-s -w" -o ${{ matrix.binary_name }} ./cmd/pyhub-installer
+
+      - name: Create tarball (Unix)
+        if: matrix.goos != 'windows'
+        run: |
+          tar czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.binary_name }}
+          
+      - name: Create zip (Windows)
+        if: matrix.goos == 'windows'
+        run: |
+          7z a -tzip ${{ matrix.asset_name }}.zip ${{ matrix.binary_name }}
+
+      - name: Generate SHA256 checksum
+        run: |
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            sha256sum ${{ matrix.asset_name }}.zip > ${{ matrix.asset_name }}.zip.sha256
+          else
+            sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+          fi
+        shell: bash
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ${{ matrix.asset_name }}*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

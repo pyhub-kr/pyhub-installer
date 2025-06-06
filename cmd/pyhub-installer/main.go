@@ -56,6 +56,9 @@ func init() {
 	downloadCmd.Flags().BoolP("extract", "x", false, "Extract archive")
 	downloadCmd.Flags().StringP("signature", "s", "", "Signature URL for verification")
 	downloadCmd.Flags().String("chmod", "755", "File permissions (Unix)")
+	downloadCmd.Flags().BoolP("remove-archive", "r", false, "Remove archive after extraction")
+	downloadCmd.Flags().BoolP("flatten", "f", false, "Remove top-level directory when extracting")
+	downloadCmd.Flags().Bool("no-flatten", false, "Disable automatic flattening of single top-level directory")
 	
 	// Install command flags
 	installCmd.Flags().String("version", "latest", "Version to install")
@@ -74,6 +77,14 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	extractFlag, _ := cmd.Flags().GetBool("extract")
 	signature, _ := cmd.Flags().GetString("signature")
 	chmod, _ := cmd.Flags().GetString("chmod")
+	removeArchive, _ := cmd.Flags().GetBool("remove-archive")
+	flatten, _ := cmd.Flags().GetBool("flatten")
+	noFlatten, _ := cmd.Flags().GetBool("no-flatten")
+
+	// Create output directory if it doesn't exist
+	if err := os.MkdirAll(output, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
 
 	// Determine filename from URL
 	filename := filepath.Base(url)
@@ -108,8 +119,25 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	if extractFlag {
 		fmt.Println("Extracting archive...")
 		extractor := extract.NewExtractor(outputPath, output)
+		
+		// Configure flatten behavior
+		if flatten {
+			extractor.SetFlatten(true)
+		} else if !noFlatten {
+			// Auto-detect single top-level directory by default
+			extractor.SetAutoFlatten(true)
+		}
+		
 		if err := extractor.Extract(); err != nil {
 			return fmt.Errorf("extraction failed: %w", err)
+		}
+		
+		// Remove archive after successful extraction if requested
+		if removeArchive {
+			fmt.Printf("Removing archive: %s\n", outputPath)
+			if err := os.Remove(outputPath); err != nil {
+				fmt.Printf("Warning: failed to remove archive: %v\n", err)
+			}
 		}
 	}
 
@@ -130,6 +158,11 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	version, _ := cmd.Flags().GetString("version")
 	platform, _ := cmd.Flags().GetString("platform")
 	output, _ := cmd.Flags().GetString("output")
+
+	// Create output directory if it doesn't exist
+	if err := os.MkdirAll(output, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
 
 	// Parse repository
 	owner, repoName, err := github.ParseRepoURL(repo)

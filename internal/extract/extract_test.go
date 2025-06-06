@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -385,4 +386,181 @@ func verifyExtractedFiles(t *testing.T, destDir string) {
 
 func contains(s, substr string) bool {
 	return bytes.Contains([]byte(s), []byte(substr))
+}
+
+// TestExtractZipWithFlatten tests ZIP extraction with flatten
+func TestExtractZipWithFlatten(t *testing.T) {
+	// Create temp directories
+	tempDir := t.TempDir()
+	archivePath := filepath.Join(tempDir, "test-flatten.zip")
+	extractPath := filepath.Join(tempDir, "extract")
+
+	// Create ZIP with single top-level directory
+	zipFile, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	zipWriter := zip.NewWriter(zipFile)
+	
+	// Add files under a single top-level directory
+	files := []struct {
+		name    string
+		content string
+	}{
+		{"myapp/README.md", "# My App"},
+		{"myapp/main.go", "package main"},
+		{"myapp/config/settings.json", "{}"},
+	}
+
+	for _, file := range files {
+		writer, err := zipWriter.Create(file.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = writer.Write([]byte(file.content))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	zipWriter.Close()
+	zipFile.Close()
+
+	t.Run("WithoutFlatten", func(t *testing.T) {
+		// Clean extract directory
+		os.RemoveAll(extractPath)
+		
+		extractor := NewExtractor(archivePath, extractPath)
+		err := extractor.Extract()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Check that top-level directory exists
+		if _, err := os.Stat(filepath.Join(extractPath, "myapp", "README.md")); err != nil {
+			t.Error("Expected myapp/README.md to exist")
+		}
+	})
+
+	t.Run("WithFlatten", func(t *testing.T) {
+		// Clean extract directory
+		os.RemoveAll(extractPath)
+		
+		extractor := NewExtractor(archivePath, extractPath)
+		extractor.SetFlatten(true)
+		err := extractor.Extract()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Check that files are extracted without top-level directory
+		if _, err := os.Stat(filepath.Join(extractPath, "README.md")); err != nil {
+			t.Error("Expected README.md to exist at root level")
+		}
+		if _, err := os.Stat(filepath.Join(extractPath, "main.go")); err != nil {
+			t.Error("Expected main.go to exist at root level")
+		}
+		if _, err := os.Stat(filepath.Join(extractPath, "config", "settings.json")); err != nil {
+			t.Error("Expected config/settings.json to exist")
+		}
+	})
+
+	t.Run("WithAutoFlatten", func(t *testing.T) {
+		// Clean extract directory
+		os.RemoveAll(extractPath)
+		
+		extractor := NewExtractor(archivePath, extractPath)
+		extractor.SetAutoFlatten(true)
+		err := extractor.Extract()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Should auto-flatten since there's only one top-level directory
+		if _, err := os.Stat(filepath.Join(extractPath, "README.md")); err != nil {
+			t.Error("Expected README.md to be auto-flattened to root level")
+		}
+	})
+}
+
+// TestExtractTarGzWithFlatten tests TAR.GZ extraction with flatten
+func TestExtractTarGzWithFlatten(t *testing.T) {
+	// Create temp directories
+	tempDir := t.TempDir()
+	archivePath := filepath.Join(tempDir, "test-flatten.tar.gz")
+	extractPath := filepath.Join(tempDir, "extract")
+
+	// Create TAR.GZ with single top-level directory
+	file, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gzWriter := gzip.NewWriter(file)
+	tarWriter := tar.NewWriter(gzWriter)
+
+	// Add files under a single top-level directory
+	files := []struct {
+		name    string
+		content string
+		mode    int64
+	}{
+		{"myapp/", "", 0755},
+		{"myapp/README.md", "# My App", 0644},
+		{"myapp/main.go", "package main", 0644},
+		{"myapp/config/", "", 0755},
+		{"myapp/config/settings.json", "{}", 0644},
+	}
+
+	for _, f := range files {
+		header := &tar.Header{
+			Name: f.name,
+			Mode: f.mode,
+			Size: int64(len(f.content)),
+		}
+		
+		if strings.HasSuffix(f.name, "/") {
+			header.Typeflag = tar.TypeDir
+		} else {
+			header.Typeflag = tar.TypeReg
+		}
+
+		if err := tarWriter.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+
+		if f.content != "" {
+			if _, err := tarWriter.Write([]byte(f.content)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	tarWriter.Close()
+	gzWriter.Close()
+	file.Close()
+
+	t.Run("WithFlatten", func(t *testing.T) {
+		// Clean extract directory
+		os.RemoveAll(extractPath)
+		
+		extractor := NewExtractor(archivePath, extractPath)
+		extractor.SetFlatten(true)
+		err := extractor.Extract()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Check that files are extracted without top-level directory
+		if _, err := os.Stat(filepath.Join(extractPath, "README.md")); err != nil {
+			t.Error("Expected README.md to exist at root level")
+		}
+		if _, err := os.Stat(filepath.Join(extractPath, "main.go")); err != nil {
+			t.Error("Expected main.go to exist at root level")
+		}
+		if _, err := os.Stat(filepath.Join(extractPath, "config", "settings.json")); err != nil {
+			t.Error("Expected config/settings.json to exist")
+		}
+	})
 }

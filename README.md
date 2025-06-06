@@ -19,23 +19,23 @@ A fast, secure cross-platform installer for downloading, verifying and installin
 
 ```bash
 # macOS (Intel)
-curl -L https://github.com/pyhub/installer/releases/latest/download/pyhub-installer-darwin-amd64.tar.gz | tar -xz
+curl -L https://github.com/pyhub-kr/pyhub-installer/releases/latest/download/pyhub-installer-darwin-amd64.tar.gz | tar -xz
 
 # macOS (Apple Silicon)
-curl -L https://github.com/pyhub/installer/releases/latest/download/pyhub-installer-darwin-arm64.tar.gz | tar -xz
+curl -L https://github.com/pyhub-kr/pyhub-installer/releases/latest/download/pyhub-installer-darwin-arm64.tar.gz | tar -xz
 
 # Linux (x64)
-curl -L https://github.com/pyhub/installer/releases/latest/download/pyhub-installer-linux-amd64.tar.gz | tar -xz
+curl -L https://github.com/pyhub-kr/pyhub-installer/releases/latest/download/pyhub-installer-linux-amd64.tar.gz | tar -xz
 
 # Windows (PowerShell)
-Invoke-WebRequest -Uri "https://github.com/pyhub/installer/releases/latest/download/pyhub-installer-windows-amd64.zip" -OutFile "pyhub-installer.zip"
+Invoke-WebRequest -Uri "https://github.com/pyhub-kr/pyhub-installer/releases/latest/download/pyhub-installer-windows-amd64.zip" -OutFile "pyhub-installer.zip"
 Expand-Archive pyhub-installer.zip -DestinationPath .
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/pyhub/installer.git
+git clone https://github.com/pyhub-kr/pyhub-installer.git
 cd installer
 make build
 ```
