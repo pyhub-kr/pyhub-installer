@@ -38,6 +38,12 @@ jobs:
           # Create build directory
           mkdir -p dist
           
+          # Get build information
+          VERSION="${{ github.ref_name }}"
+          COMMIT="${{ github.sha }}"
+          SHORT_COMMIT="${COMMIT:0:7}"
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          
           # Build matrix
           platforms=(
             "linux/amd64"
@@ -63,9 +69,9 @@ jobs:
             
             echo "Building for $GOOS/$GOARCH..."
             
-            # Build
+            # Build with version information
             CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
-              go build -v -ldflags "-s -w" \
+              go build -v -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${SHORT_COMMIT} -X main.date=${BUILD_DATE}" \
               -o "dist/${binary_name}" \
               ./cmd/pyhub-installer
             
