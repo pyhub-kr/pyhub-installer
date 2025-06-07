@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/pyhub-kr/pyhub-installer/internal/download"
@@ -39,7 +40,7 @@ var downloadCmd = &cobra.Command{
 
 var installCmd = &cobra.Command{
 	Use:   "install [GITHUB_REPO]",
-	Short: "Install from GitHub release (e.g., github:pyhub/mcptools)",
+	Short: "Install from GitHub release (e.g., github:pyhub-kr/pyhub-mcptools)",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := runInstall(cmd, args); err != nil {
@@ -80,6 +81,26 @@ func runDownload(cmd *cobra.Command, args []string) error {
 	removeArchive, _ := cmd.Flags().GetBool("remove-archive")
 	flatten, _ := cmd.Flags().GetBool("flatten")
 	noFlatten, _ := cmd.Flags().GetBool("no-flatten")
+
+	// If user specified a system directory and doesn't have write permission, find alternative
+	systemDirs := []string{"/usr/local/bin", "/usr/bin", "/opt", "/usr/local"}
+	isSystemDir := false
+	for _, sysDir := range systemDirs {
+		if strings.HasPrefix(output, sysDir) {
+			isSystemDir = true
+			break
+		}
+	}
+	
+	if isSystemDir {
+		// Try to create directory first to test permission
+		if err := os.MkdirAll(output, 0755); err != nil {
+			if writableDir, pathErr := install.FindWritableInstallPath(); pathErr == nil {
+				fmt.Printf("Permission denied for %s, using writable directory: %s\n", output, writableDir)
+				output = writableDir
+			}
+		}
+	}
 
 	// Create output directory if it doesn't exist
 	if err := os.MkdirAll(output, 0755); err != nil {
@@ -158,6 +179,16 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	version, _ := cmd.Flags().GetString("version")
 	platform, _ := cmd.Flags().GetString("platform")
 	output, _ := cmd.Flags().GetString("output")
+
+	// If using default output path, try to find a writable directory in PATH
+	if output == "/usr/local/bin" {
+		if writableDir, err := install.FindWritableInstallPath(); err == nil {
+			if writableDir != output {
+				fmt.Printf("Using writable directory: %s\n", writableDir)
+				output = writableDir
+			}
+		}
+	}
 
 	// Create output directory if it doesn't exist
 	if err := os.MkdirAll(output, 0755); err != nil {

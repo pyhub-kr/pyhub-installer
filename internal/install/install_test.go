@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -411,4 +412,91 @@ func TestCopyFile(t *testing.T) {
 			break
 		}
 	}
+}
+
+// TestFindWritableInstallPath tests finding writable install path
+func TestFindWritableInstallPath(t *testing.T) {
+	// This test checks that the function returns a path
+	path, err := FindWritableInstallPath()
+	if err != nil {
+		t.Fatalf("FindWritableInstallPath failed: %v", err)
+	}
+	
+	if path == "" {
+		t.Error("FindWritableInstallPath returned empty path")
+	}
+	
+	// Test that the returned path is actually writable
+	if !isDirectoryWritable(path) {
+		t.Errorf("Returned path is not writable: %s", path)
+	}
+	
+	t.Logf("Found writable install path: %s", path)
+}
+
+// TestGetPathDirectories tests PATH parsing
+func TestGetPathDirectories(t *testing.T) {
+	// Save original PATH
+	originalPath := os.Getenv("PATH")
+	defer os.Setenv("PATH", originalPath)
+	
+	// Test with custom PATH
+	testPath := "/usr/local/bin:/usr/bin:/bin"
+	if runtime.GOOS == "windows" {
+		testPath = "C:\\bin;C:\\Windows\\system32"
+	}
+	
+	os.Setenv("PATH", testPath)
+	
+	dirs := getPathDirectories()
+	if len(dirs) == 0 {
+		t.Error("getPathDirectories returned no directories")
+	}
+	
+	t.Logf("PATH directories: %v", dirs)
+}
+
+// TestIsDirectoryWritable tests directory writability check
+func TestIsDirectoryWritable(t *testing.T) {
+	// Test with temp directory (should be writable)
+	tempDir := t.TempDir()
+	if !isDirectoryWritable(tempDir) {
+		t.Errorf("Temp directory should be writable: %s", tempDir)
+	}
+	
+	// Test with non-existent directory
+	if isDirectoryWritable("/non/existent/path") {
+		t.Error("Non-existent directory should not be writable")
+	}
+	
+	// Test with system directory (likely not writable for regular users)
+	if runtime.GOOS != "windows" {
+		writable := isDirectoryWritable("/root")
+		t.Logf("/root writable: %v", writable)
+	}
+}
+
+// TestGetFallbackDirectories tests fallback directory generation
+func TestGetFallbackDirectories(t *testing.T) {
+	fallbacks := getFallbackDirectories()
+	if len(fallbacks) == 0 {
+		t.Error("getFallbackDirectories returned no directories")
+	}
+	
+	// Should include user home-based directories
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		found := false
+		for _, dir := range fallbacks {
+			if strings.HasPrefix(dir, homeDir) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("No home-based directories in fallbacks")
+		}
+	}
+	
+	t.Logf("Fallback directories: %v", fallbacks)
 }

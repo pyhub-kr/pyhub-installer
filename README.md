@@ -2,7 +2,7 @@
 
 A fast, secure cross-platform installer for downloading, verifying and installing files from URLs or GitHub releases.
 
-**Standalone project** - This is an independent CLI tool that can be used with any project, not just pyhub-mcptools.
+**Standalone project** - This is an independent CLI tool that can be used with any project, not just pyhub-kr/pyhub-mcptools.
 
 ## Features
 
