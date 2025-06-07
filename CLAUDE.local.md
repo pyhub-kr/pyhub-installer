@@ -1,0 +1,3 @@
+- Windows에서 macOS/Linux 경로인 c:/usr/local/bin/를 사용 중 문제 발견. 윈도우용 적절한 설치 경로 필요
+  - 윈도우에 맞는 경로 예시: C:\Program Files\PyHubInstaller 또는 %LOCALAPPDATA%\PyHubInstaller
+  - 크로스 플랫폼 대응을 위해 OS별 경로 분기 로직 구현 필요

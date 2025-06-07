@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -13,6 +14,13 @@ import (
 	"github.com/pyhub-kr/pyhub-installer/internal/extract"
 	"github.com/pyhub-kr/pyhub-installer/internal/install"
 	"github.com/pyhub-kr/pyhub-installer/internal/github"
+)
+
+// Version information set by ldflags
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 var rootCmd = &cobra.Command{
@@ -50,6 +58,36 @@ var installCmd = &cobra.Command{
 	},
 }
 
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print version information",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("pyhub-installer %s\n", version)
+		fmt.Printf("Commit: %s\n", commit)
+		fmt.Printf("Built: %s\n", date)
+		fmt.Printf("Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+	},
+}
+
+// getDefaultInstallPath returns platform-specific default installation path
+func getDefaultInstallPath() string {
+	switch runtime.GOOS {
+	case "windows":
+		// Windows: Use %LOCALAPPDATA%\Programs or fallback to %USERPROFILE%\bin
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			return filepath.Join(localAppData, "Programs")
+		}
+		if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+			return filepath.Join(userProfile, "bin")
+		}
+		return "."
+	case "darwin", "linux":
+		return "/usr/local/bin"
+	default:
+		return "."
+	}
+}
+
 func init() {
 	// Download command flags
 	downloadCmd.Flags().StringP("output", "o", ".", "Output directory")
@@ -64,10 +102,11 @@ func init() {
 	// Install command flags
 	installCmd.Flags().String("version", "latest", "Version to install")
 	installCmd.Flags().String("platform", "", "Target platform (auto-detect if empty)")
-	installCmd.Flags().StringP("output", "o", "/usr/local/bin", "Installation directory")
+	installCmd.Flags().StringP("output", "o", getDefaultInstallPath(), "Installation directory")
 	
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(versionCmd)
 }
 
 // runDownload implements the download command
@@ -181,7 +220,8 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 
 	// If using default output path, try to find a writable directory in PATH
-	if output == "/usr/local/bin" {
+	defaultPath := getDefaultInstallPath()
+	if output == defaultPath || output == "/usr/local/bin" {
 		if writableDir, err := install.FindWritableInstallPath(); err == nil {
 			if writableDir != output {
 				fmt.Printf("Using writable directory: %s\n", writableDir)

@@ -312,19 +312,42 @@ func getFallbackDirectories() []string {
 		return []string{"."}
 	}
 	
-	fallbacks := []string{
-		filepath.Join(homeDir, ".local", "bin"),
-		filepath.Join(homeDir, "bin"),
-	}
+	var fallbacks []string
 	
 	// Add platform-specific fallbacks
 	switch runtime.GOOS {
+	case "windows":
+		// Windows specific paths
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			fallbacks = append(fallbacks, filepath.Join(localAppData, "Programs"))
+		}
+		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+			fallbacks = append(fallbacks, filepath.Join(programFiles, "pyhub-installer"))
+		}
+		fallbacks = append(fallbacks, 
+			filepath.Join(homeDir, "bin"),
+			filepath.Join(homeDir, ".local", "bin"),
+		)
 	case "darwin":
 		// macOS specific paths
-		fallbacks = append(fallbacks, "/opt/homebrew/bin", "/usr/local/bin")
+		fallbacks = []string{
+			filepath.Join(homeDir, ".local", "bin"),
+			filepath.Join(homeDir, "bin"),
+			"/opt/homebrew/bin",
+			"/usr/local/bin",
+		}
 	case "linux":
 		// Linux specific paths
-		fallbacks = append(fallbacks, "/usr/local/bin")
+		fallbacks = []string{
+			filepath.Join(homeDir, ".local", "bin"),
+			filepath.Join(homeDir, "bin"),
+			"/usr/local/bin",
+		}
+	default:
+		fallbacks = []string{
+			filepath.Join(homeDir, ".local", "bin"),
+			filepath.Join(homeDir, "bin"),
+		}
 	}
 	
 	return fallbacks
