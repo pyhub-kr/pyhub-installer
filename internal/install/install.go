@@ -272,9 +272,10 @@ func getPathDirectories() []string {
 	
 	dirs := strings.Split(pathEnv, separator)
 	
-	// Filter and prioritize directories
-	var prioritized []string
-	var others []string
+	// Filter and prioritize directories into three groups
+	var highPriority []string    // User and system tool directories
+	var normalPriority []string  // Other directories
+	var lowPriority []string     // Language-specific directories
 	
 	homeDir, _ := os.UserHomeDir()
 	
@@ -291,18 +292,25 @@ func getPathDirectories() []string {
 			continue
 		}
 		
-		// Prioritize user-local directories
-		if strings.HasPrefix(dir, homeDir) {
-			prioritized = append(prioritized, dir)
+		// Check if it's a language-specific directory
+		if isLanguageSpecificPath(dir) {
+			lowPriority = append(lowPriority, dir)
+			continue
+		}
+		
+		// Prioritize user-local directories (but not language-specific ones)
+		if strings.HasPrefix(dir, homeDir) && !isLanguageSpecificPath(dir) {
+			highPriority = append(highPriority, dir)
 		} else if isPreferredSystemPath(dir) {
-			prioritized = append(prioritized, dir)
+			highPriority = append(highPriority, dir)
 		} else {
-			others = append(others, dir)
+			normalPriority = append(normalPriority, dir)
 		}
 	}
 	
-	// Return prioritized first, then others
-	return append(prioritized, others...)
+	// Return in priority order: high, normal, then language-specific as last resort
+	result := append(highPriority, normalPriority...)
+	return append(result, lowPriority...)
 }
 
 // getFallbackDirectories returns fallback directories if no PATH directory is writable
@@ -409,16 +417,123 @@ func isProblematicPath(dir string) bool {
 
 // isPreferredSystemPath checks if a system path is preferred
 func isPreferredSystemPath(dir string) bool {
-	preferredPaths := []string{
-		"/usr/local/bin",
-		"/opt/homebrew/bin",
-		"/snap/bin",
-	}
+	// Normalize for comparison
+	normalizedDir := strings.ToLower(filepath.ToSlash(dir))
 	
-	for _, preferred := range preferredPaths {
-		if dir == preferred {
+	// Windows preferred paths
+	if runtime.GOOS == "windows" {
+		// Check for common Windows tool paths
+		windowsPaths := []string{
+			"c:/tools",           // Chocolatey default
+			"c:/program files/git/bin",
+			"c:/program files/git/usr/bin",
+			"c:/windows/system32/windowspowershell",
+		}
+		
+		for _, preferred := range windowsPaths {
+			if strings.HasPrefix(normalizedDir, preferred) {
+				return true
+			}
+		}
+		
+		// Check for user-specific preferred paths
+		if strings.Contains(normalizedDir, "/appdata/local/programs") &&
+			!strings.Contains(normalizedDir, "python") &&
+			!strings.Contains(normalizedDir, "node") {
 			return true
 		}
+		
+		if strings.Contains(normalizedDir, "/appdata/local/microsoft/windowsapps") {
+			return true
+		}
+	} else {
+		// Unix-like preferred paths
+		preferredPaths := []string{
+			"/usr/local/bin",
+			"/opt/homebrew/bin",
+			"/snap/bin",
+			"/opt/local/bin",  // MacPorts
+		}
+		
+		for _, preferred := range preferredPaths {
+			if dir == preferred {
+				return true
+			}
+		}
+	}
+	
+	return false
+}
+
+// isLanguageSpecificPath checks if a path is language/package-manager specific
+func isLanguageSpecificPath(dir string) bool {
+	// Normalize path for comparison
+	dir = strings.ToLower(filepath.ToSlash(dir))
+	
+	// Python-specific paths
+	if strings.Contains(dir, "python") {
+		// Windows Python Scripts directory
+		if strings.Contains(dir, "python") && strings.Contains(dir, "scripts") {
+			return true
+		}
+		// Unix Python site-packages
+		if strings.Contains(dir, "site-packages") {
+			return true
+		}
+		// General Python paths
+		if strings.Contains(dir, "/python") || strings.Contains(dir, "\\python") {
+			return true
+		}
+	}
+	
+	// Conda/Anaconda
+	if strings.Contains(dir, "conda") || strings.Contains(dir, "anaconda") {
+		return true
+	}
+	
+	// Node.js/npm paths
+	if strings.Contains(dir, "node_modules") || strings.Contains(dir, "npm") {
+		return true
+	}
+	if strings.Contains(dir, "nodejs") {
+		return true
+	}
+	
+	// Ruby/gem paths
+	if strings.Contains(dir, "/gems/") || strings.Contains(dir, "/ruby/") {
+		return true
+	}
+	if strings.Contains(dir, "/.gem/") {
+		return true
+	}
+	
+	// Rust/cargo paths
+	if strings.Contains(dir, "/.cargo/bin") || strings.Contains(dir, "\\.cargo\\bin") {
+		return true
+	}
+	
+	// Go paths (but not system Go)
+	if strings.Contains(dir, "/go/bin") && !strings.Contains(dir, "/usr/local/go/bin") {
+		return true
+	}
+	
+	// Virtual environments
+	if strings.Contains(dir, "/venv/") || strings.Contains(dir, "/virtualenv/") {
+		return true
+	}
+	if strings.Contains(dir, "\\venv\\") || strings.Contains(dir, "\\virtualenv\\") {
+		return true
+	}
+	
+	// Package managers in user home
+	if strings.Contains(dir, "/.local/share/") && (strings.Contains(dir, "/pip/") || 
+		strings.Contains(dir, "/pipx/") || strings.Contains(dir, "/poetry/")) {
+		return true
+	}
+	
+	// pipx paths
+	if strings.Contains(dir, "pipx") {
+		return true
 	}
 	
 	return false

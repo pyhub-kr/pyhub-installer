@@ -500,3 +500,126 @@ func TestGetFallbackDirectories(t *testing.T) {
 	
 	t.Logf("Fallback directories: %v", fallbacks)
 }
+
+// TestIsLanguageSpecificPath tests language-specific path detection
+func TestIsLanguageSpecificPath(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+		desc     string
+	}{
+		// Python paths
+		{`C:\Users\user\AppData\Local\Programs\Python\Python312\Scripts`, true, "Windows Python Scripts"},
+		{`/usr/local/lib/python3.9/site-packages`, true, "Unix Python site-packages"},
+		{`/home/user/.local/lib/python3.8/site-packages`, true, "User Python packages"},
+		{`/opt/anaconda3/bin`, true, "Anaconda path"},
+		
+		// Node.js paths
+		{`/usr/local/lib/node_modules/.bin`, true, "Global npm bin"},
+		{`/home/user/.npm-global/bin`, true, "User npm global"},
+		{`C:\Users\user\AppData\Roaming\npm`, true, "Windows npm"},
+		
+		// Ruby paths
+		{`/usr/local/lib/ruby/gems/3.0.0/bin`, true, "Ruby gems"},
+		{`/home/user/.gem/ruby/2.7.0/bin`, true, "User Ruby gems"},
+		
+		// Other language paths
+		{`/home/user/.cargo/bin`, true, "Rust cargo"},
+		{`/home/user/go/bin`, true, "Go user bin"},
+		{`/home/user/project/venv/bin`, true, "Python virtualenv"},
+		
+		// Non-language paths
+		{`/usr/local/bin`, false, "System bin"},
+		{`/usr/bin`, false, "System bin"},
+		{`C:\Windows\System32`, false, "Windows system"},
+		{`C:\tools`, false, "Tools directory"},
+		{`/opt/homebrew/bin`, false, "Homebrew"},
+		{`/home/user/bin`, false, "User bin"},
+		{`/usr/local/go/bin`, false, "System Go installation"},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			result := isLanguageSpecificPath(tt.path)
+			if result != tt.expected {
+				t.Errorf("isLanguageSpecificPath(%s) = %v, want %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestPathPrioritization tests that paths are prioritized correctly
+func TestPathPrioritization(t *testing.T) {
+	// Save original PATH
+	originalPath := os.Getenv("PATH")
+	defer os.Setenv("PATH", originalPath)
+	
+	// Create test PATH with various types of directories
+	separator := ":"
+	if runtime.GOOS == "windows" {
+		separator = ";"
+	}
+	
+	homeDir, _ := os.UserHomeDir()
+	var testPaths []string
+	
+	if runtime.GOOS == "windows" {
+		testPaths = []string{
+			`C:\Users\user\AppData\Local\Programs\Python\Python312\Scripts`,
+			`C:\Users\user\AppData\Local\Programs`,
+			`C:\Users\user\bin`,
+			`C:\tools`,
+			`C:\Program Files\nodejs`,
+		}
+	} else {
+		testPaths = []string{
+			filepath.Join(homeDir, ".local", "lib", "python3.9", "site-packages", "bin"), // Python path
+			filepath.Join(homeDir, ".cargo", "bin"),                                       // Rust path
+			filepath.Join(homeDir, ".local", "bin"),                                       // User local bin
+			filepath.Join(homeDir, "bin"),                                                 // User bin
+			"/usr/local/bin",                                                              // System bin
+			filepath.Join(homeDir, "node_modules", ".bin"),                               // Node.js path
+		}
+	}
+	
+	os.Setenv("PATH", strings.Join(testPaths, separator))
+	
+	// Get prioritized paths
+	paths := getPathDirectories()
+	
+	// Find indices of different path types
+	pythonIndex := -1
+	nodeIndex := -1
+	userBinIndex := -1
+	
+	for i, path := range paths {
+		normalizedPath := strings.ToLower(filepath.ToSlash(path))
+		if strings.Contains(normalizedPath, "python") && strings.Contains(normalizedPath, "scripts") {
+			pythonIndex = i
+		} else if strings.Contains(normalizedPath, "node") {
+			nodeIndex = i
+		} else if (strings.Contains(normalizedPath, "/bin") || strings.Contains(normalizedPath, "\\bin")) && 
+			!strings.Contains(normalizedPath, "python") && 
+			!strings.Contains(normalizedPath, "node") &&
+			!strings.Contains(normalizedPath, "cargo") {
+			if userBinIndex == -1 {
+				userBinIndex = i
+			}
+		}
+	}
+	
+	// User bin should come before language-specific paths
+	if pythonIndex != -1 && userBinIndex != -1 {
+		if userBinIndex > pythonIndex {
+			t.Errorf("User bin (index %d) should come before Python path (index %d)", userBinIndex, pythonIndex)
+		}
+	}
+	if nodeIndex != -1 && userBinIndex != -1 {
+		if userBinIndex > nodeIndex {
+			t.Errorf("User bin (index %d) should come before Node path (index %d)", userBinIndex, nodeIndex)
+		}
+	}
+	
+	t.Logf("Path priorities - User bin: %d, Python: %d, Node: %d", userBinIndex, pythonIndex, nodeIndex)
+	t.Logf("All paths: %v", paths)
+}
