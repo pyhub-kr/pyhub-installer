@@ -623,3 +623,70 @@ func TestPathPrioritization(t *testing.T) {
 	t.Logf("Path priorities - User bin: %d, Python: %d, Node: %d", userBinIndex, pythonIndex, nodeIndex)
 	t.Logf("All paths: %v", paths)
 }
+
+// TestIsIDESpecificPath tests IDE-specific path detection
+func TestIsIDESpecificPath(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+		desc     string
+	}{
+		// IDE paths that should be detected
+		{`c:/users/user/appdata/local/programs/cursor/resources/app/bin`, true, "Cursor IDE path"},
+		{`/Applications/Visual Studio Code.app/Contents/Resources/app/bin`, true, "VSCode macOS path"},
+		{`/home/user/.vscode/extensions/something/bin`, true, "VSCode extensions"},
+		{`c:/program files/jetbrains/pycharm/bin`, true, "PyCharm path"},
+		{`/opt/intellij-idea/bin`, true, "IntelliJ IDEA path"},
+		{`c:/users/user/appdata/roaming/sublime text 3/packages`, true, "Sublime Text path"},
+		
+		// Non-IDE paths that should not be detected
+		{`/usr/local/bin`, false, "System bin"},
+		{`c:/tools`, false, "Tools directory"},
+		{`/home/user/.local/bin`, false, "User local bin"},
+		{`c:/windows/system32`, false, "Windows system"},
+		{`/opt/homebrew/bin`, false, "Homebrew"},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			normalizedPath := strings.ToLower(filepath.ToSlash(tt.path))
+			result := isIDESpecificPath(normalizedPath)
+			if result != tt.expected {
+				t.Errorf("isIDESpecificPath(%s) = %v, want %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestWindowsAppDataPaths tests Windows APPDATA path handling
+func TestWindowsAppDataPaths(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Skipping Windows-specific test on non-Windows platform")
+	}
+	
+	// Test getFallbackDirectories on Windows
+	fallbacks := getFallbackDirectories()
+	
+	// Should include LOCALAPPDATA and APPDATA paths
+	hasLocalAppData := false
+	hasAppData := false
+	
+	for _, path := range fallbacks {
+		if strings.Contains(strings.ToLower(path), "localappdata") {
+			hasLocalAppData = true
+		}
+		if strings.Contains(strings.ToLower(path), "appdata") && 
+		   !strings.Contains(strings.ToLower(path), "localappdata") {
+			hasAppData = true
+		}
+	}
+	
+	if !hasLocalAppData {
+		t.Error("Windows fallback paths should include LOCALAPPDATA")
+	}
+	if !hasAppData {
+		t.Error("Windows fallback paths should include APPDATA")
+	}
+	
+	t.Logf("Windows fallback paths: %v", fallbacks)
+}

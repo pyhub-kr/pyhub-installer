@@ -538,3 +538,49 @@ func isLanguageSpecificPath(dir string) bool {
 	
 	return false
 }
+
+// isIDESpecificPath checks if a path is IDE-specific and should be avoided
+func isIDESpecificPath(normalizedPath string) bool {
+	// Common IDE paths to avoid
+	idePatterns := []string{
+		// VSCode and variants
+		".vscode",
+		"code/extensions",
+		"code/user",
+		"code - insiders",
+		// Cursor
+		"cursor",
+		".cursor",
+		// JetBrains IDEs
+		"jetbrains",
+		"intellij",
+		".intellij",
+		".pycharm",
+		"pycharm",
+		".webstorm",
+		"webstorm",
+		".goland",
+		"goland",
+		".rider",
+		"rider",
+		// Sublime Text
+		"sublime text",
+		".sublime",
+		// Atom
+		".atom",
+		// Visual Studio
+		"microsoft visual studio",
+		"visual studio",
+		// Other editors
+		"notepad++",
+		"brackets",
+	}
+	
+	for _, pattern := range idePatterns {
+		if strings.Contains(normalizedPath, pattern) {
+			return true
+		}
+	}
+	
+	return false
+}
