@@ -230,3 +230,173 @@ func (i *Installer) addToPathUnix(dirPath string) error {
 	fmt.Printf("  export PATH=\"%s:$PATH\"\n", dirPath)
 	return nil
 }
+
+// FindWritableInstallPath finds the best writable directory from PATH
+func FindWritableInstallPath() (string, error) {
+	// Get PATH directories
+	pathDirs := getPathDirectories()
+	
+	// Check each PATH directory for writability
+	for _, dir := range pathDirs {
+		if isDirectoryWritable(dir) {
+			return dir, nil
+		}
+	}
+	
+	// Fallback to user directories if no writable PATH directory found
+	fallbackDirs := getFallbackDirectories()
+	for _, dir := range fallbackDirs {
+		// Create directory if it doesn't exist
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			continue
+		}
+		if isDirectoryWritable(dir) {
+			return dir, nil
+		}
+	}
+	
+	return "", fmt.Errorf("no writable installation directory found in PATH or fallback locations")
+}
+
+// getPathDirectories returns directories from PATH environment variable in priority order
+func getPathDirectories() []string {
+	pathEnv := os.Getenv("PATH")
+	if pathEnv == "" {
+		return []string{}
+	}
+	
+	separator := ":"
+	if runtime.GOOS == "windows" {
+		separator = ";"
+	}
+	
+	dirs := strings.Split(pathEnv, separator)
+	
+	// Filter and prioritize directories
+	var prioritized []string
+	var others []string
+	
+	homeDir, _ := os.UserHomeDir()
+	
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		
+		// Clean path
+		dir = filepath.Clean(dir)
+		
+		// Skip problematic directories
+		if isProblematicPath(dir) {
+			continue
+		}
+		
+		// Prioritize user-local directories
+		if strings.HasPrefix(dir, homeDir) {
+			prioritized = append(prioritized, dir)
+		} else if isPreferredSystemPath(dir) {
+			prioritized = append(prioritized, dir)
+		} else {
+			others = append(others, dir)
+		}
+	}
+	
+	// Return prioritized first, then others
+	return append(prioritized, others...)
+}
+
+// getFallbackDirectories returns fallback directories if no PATH directory is writable
+func getFallbackDirectories() []string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return []string{"."}
+	}
+	
+	fallbacks := []string{
+		filepath.Join(homeDir, ".local", "bin"),
+		filepath.Join(homeDir, "bin"),
+	}
+	
+	// Add platform-specific fallbacks
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS specific paths
+		fallbacks = append(fallbacks, "/opt/homebrew/bin", "/usr/local/bin")
+	case "linux":
+		// Linux specific paths
+		fallbacks = append(fallbacks, "/usr/local/bin")
+	}
+	
+	return fallbacks
+}
+
+// isDirectoryWritable checks if a directory is writable
+func isDirectoryWritable(dir string) bool {
+	// Check if directory exists
+	info, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	
+	if !info.IsDir() {
+		return false
+	}
+	
+	// Try to create a temporary file to test writability
+	testFile := filepath.Join(dir, ".write_test_"+strconv.Itoa(os.Getpid()))
+	file, err := os.Create(testFile)
+	if err != nil {
+		return false
+	}
+	
+	file.Close()
+	os.Remove(testFile)
+	return true
+}
+
+// isProblematicPath checks if a path should be skipped
+func isProblematicPath(dir string) bool {
+	// Skip empty or current directory
+	if dir == "" || dir == "." {
+		return true
+	}
+	
+	// Skip network paths (UNC paths on Windows)
+	if runtime.GOOS == "windows" && strings.HasPrefix(dir, "\\\\") {
+		return true
+	}
+	
+	// Skip some system directories that are typically read-only
+	problematicPaths := []string{
+		"/sbin",
+		"/usr/sbin",
+		"/System",
+		"/Windows",
+		"/Program Files",
+	}
+	
+	for _, problematic := range problematicPaths {
+		if strings.HasPrefix(dir, problematic) {
+			return true
+		}
+	}
+	
+	return false
+}
+
+// isPreferredSystemPath checks if a system path is preferred
+func isPreferredSystemPath(dir string) bool {
+	preferredPaths := []string{
+		"/usr/local/bin",
+		"/opt/homebrew/bin",
+		"/snap/bin",
+	}
+	
+	for _, preferred := range preferredPaths {
+		if dir == preferred {
+			return true
+		}
+	}
+	
+	return false
+}
