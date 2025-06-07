@@ -231,31 +231,214 @@ func (i *Installer) addToPathUnix(dirPath string) error {
 	return nil
 }
 
-// FindWritableInstallPath finds the best writable directory from PATH
-func FindWritableInstallPath() (string, error) {
-	// Get PATH directories
-	pathDirs := getPathDirectories()
+// GetStandardInstallPath returns the standard installation path for a program
+// Returns installPath (where files are installed) and binPath (where executables/links go)
+func GetStandardInstallPath(programName string) (installPath string, binPath string, err error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
 	
-	// Check each PATH directory for writability
-	for _, dir := range pathDirs {
-		if isDirectoryWritable(dir) {
-			return dir, nil
+	switch runtime.GOOS {
+	case "windows":
+		// Windows: Each program gets its own directory, add to PATH
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData == "" {
+			localAppData = filepath.Join(homeDir, "AppData", "Local")
+		}
+		installPath = filepath.Join(localAppData, "Programs", programName)
+		binPath = installPath // Windows adds program directory to PATH
+		
+	case "darwin", "linux":
+		// Unix-like: Install to share, symlink to bin
+		installPath = filepath.Join(homeDir, ".local", "share", programName)
+		binPath = filepath.Join(homeDir, ".local", "bin")
+		
+	default:
+		// Fallback for other systems
+		installPath = filepath.Join(homeDir, ".local", "share", programName)
+		binPath = filepath.Join(homeDir, ".local", "bin")
+	}
+	
+	return installPath, binPath, nil
+}
+
+// IsPathInEnv checks if a directory is in the PATH environment variable
+func IsPathInEnv(dirPath string) bool {
+	pathEnv := os.Getenv("PATH")
+	if pathEnv == "" {
+		return false
+	}
+	
+	separator := ":"
+	if runtime.GOOS == "windows" {
+		separator = ";"
+	}
+	
+	paths := strings.Split(pathEnv, separator)
+	cleanDir := filepath.Clean(dirPath)
+	
+	for _, p := range paths {
+		if filepath.Clean(p) == cleanDir {
+			return true
 		}
 	}
 	
-	// Fallback to user directories if no writable PATH directory found
-	fallbackDirs := getFallbackDirectories()
-	for _, dir := range fallbackDirs {
-		// Create directory if it doesn't exist
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			continue
-		}
-		if isDirectoryWritable(dir) {
-			return dir, nil
-		}
+	return false
+}
+
+// InstallStrategy defines how to install a program
+type InstallStrategy interface {
+	Install(source string, programName string) error
+}
+
+// DirectoryInstallStrategy installs a directory with multiple files
+type DirectoryInstallStrategy struct {
+	InstallPath string
+	BinPath     string
+}
+
+// Install installs a directory to the standard location
+func (s *DirectoryInstallStrategy) Install(sourceDir string, programName string) error {
+	// Create installation directory
+	if err := os.MkdirAll(s.InstallPath, 0755); err != nil {
+		return fmt.Errorf("failed to create installation directory: %w", err)
 	}
 	
-	return "", fmt.Errorf("no writable installation directory found in PATH or fallback locations")
+	// Copy all files from source to install path
+	err := filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		
+		// Calculate relative path
+		relPath, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		
+		destPath := filepath.Join(s.InstallPath, relPath)
+		
+		if info.IsDir() {
+			return os.MkdirAll(destPath, info.Mode())
+		}
+		
+		// Copy file
+		return copyFileWithPermissions(path, destPath, info.Mode())
+	})
+	
+	if err != nil {
+		return fmt.Errorf("failed to copy directory: %w", err)
+	}
+	
+	// Find executables and create symlinks (Unix) or add to PATH (Windows)
+	if runtime.GOOS != "windows" {
+		return s.createSymlinks(programName)
+	}
+	
+	return nil
+}
+
+// createSymlinks creates symbolic links for executables in bin directory
+func (s *DirectoryInstallStrategy) createSymlinks(programName string) error {
+	// Create bin directory if it doesn't exist
+	if err := os.MkdirAll(s.BinPath, 0755); err != nil {
+		return fmt.Errorf("failed to create bin directory: %w", err)
+	}
+	
+	// Find executable files
+	executables, err := FindExecutables(s.InstallPath)
+	if err != nil {
+		return fmt.Errorf("failed to find executables: %w", err)
+	}
+	
+	// Create symlinks for each executable
+	for _, exe := range executables {
+		exeName := filepath.Base(exe)
+		linkPath := filepath.Join(s.BinPath, exeName)
+		
+		// Remove existing link if any
+		os.Remove(linkPath)
+		
+		// Create new symlink
+		if err := os.Symlink(exe, linkPath); err != nil {
+			return fmt.Errorf("failed to create symlink for %s: %w", exeName, err)
+		}
+		
+		fmt.Printf("✓ Created symlink: %s -> %s\n", linkPath, exe)
+	}
+	
+	return nil
+}
+
+// SingleFileInstallStrategy installs a single executable file
+type SingleFileInstallStrategy struct {
+	InstallPath string
+	BinPath     string
+}
+
+// Install installs a single file to the standard location
+func (s *SingleFileInstallStrategy) Install(sourceFile string, programName string) error {
+	// Create installation directory
+	if err := os.MkdirAll(s.InstallPath, 0755); err != nil {
+		return fmt.Errorf("failed to create installation directory: %w", err)
+	}
+	
+	// Determine destination file name
+	fileName := filepath.Base(sourceFile)
+	destFile := filepath.Join(s.InstallPath, fileName)
+	
+	// Copy file with permissions
+	info, err := os.Stat(sourceFile)
+	if err != nil {
+		return fmt.Errorf("failed to stat source file: %w", err)
+	}
+	
+	if err := copyFileWithPermissions(sourceFile, destFile, info.Mode()); err != nil {
+		return fmt.Errorf("failed to copy file: %w", err)
+	}
+	
+	// Create symlink (Unix) or copy to bin (Windows)
+	if runtime.GOOS != "windows" {
+		// Create bin directory if needed
+		if err := os.MkdirAll(s.BinPath, 0755); err != nil {
+			return fmt.Errorf("failed to create bin directory: %w", err)
+		}
+		
+		linkPath := filepath.Join(s.BinPath, fileName)
+		os.Remove(linkPath) // Remove existing link if any
+		
+		if err := os.Symlink(destFile, linkPath); err != nil {
+			return fmt.Errorf("failed to create symlink: %w", err)
+		}
+		
+		fmt.Printf("✓ Created symlink: %s -> %s\n", linkPath, destFile)
+	}
+	
+	fmt.Printf("✓ Installed to: %s\n", s.InstallPath)
+	return nil
+}
+
+// copyFileWithPermissions copies a file preserving permissions
+func copyFileWithPermissions(src, dst string, mode os.FileMode) error {
+	input, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+	
+	output, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+	
+	if _, err := output.ReadFrom(input); err != nil {
+		return err
+	}
+	
+	// Set permissions
+	return os.Chmod(dst, mode)
 }
 
 // getPathDirectories returns directories from PATH environment variable in priority order
