@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  release-and-build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -19,92 +19,110 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
       - name: Run tests
         run: make test
 
+      - name: Build all platforms
+        run: |
+          # Create build directory
+          mkdir -p dist
+          
+          # Build matrix
+          platforms=(
+            "linux/amd64"
+            "linux/arm64"
+            "darwin/amd64"
+            "darwin/arm64"
+            "windows/amd64"
+          )
+          
+          for platform in "${platforms[@]}"; do
+            IFS='/' read -r -a platform_split <<< "$platform"
+            GOOS="${platform_split[0]}"
+            GOARCH="${platform_split[1]}"
+            
+            # Set binary name
+            binary_name="pyhub-installer"
+            if [ "$GOOS" = "windows" ]; then
+              binary_name="${binary_name}.exe"
+            fi
+            
+            # Set output name
+            output_name="pyhub-installer-${GOOS}-${GOARCH}"
+            
+            echo "Building for $GOOS/$GOARCH..."
+            
+            # Build
+            CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
+              go build -v -ldflags "-s -w" \
+              -o "dist/${binary_name}" \
+              ./cmd/pyhub-installer
+            
+            # Create archive
+            if [ "$GOOS" = "windows" ]; then
+              # Create zip for Windows
+              (cd dist && zip -j "${output_name}.zip" "${binary_name}")
+              # Generate checksum
+              (cd dist && sha256sum "${output_name}.zip" > "${output_name}.zip.sha256")
+            else
+              # Create tar.gz for Unix
+              (cd dist && tar czf "${output_name}.tar.gz" "${binary_name}")
+              # Generate checksum
+              (cd dist && sha256sum "${output_name}.tar.gz" > "${output_name}.tar.gz.sha256")
+            fi
+            
+            # Clean up binary
+            rm -f "dist/${binary_name}"
+          done
+          
+          # List all artifacts
+          echo "Build artifacts:"
+          ls -la dist/
+
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
-
-  build:
-    needs: release
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          # Linux builds
-          - goos: linux
-            goarch: amd64
-            binary_name: pyhub-installer
-            asset_name: pyhub-installer-linux-amd64
-          - goos: linux
-            goarch: arm64
-            binary_name: pyhub-installer
-            asset_name: pyhub-installer-linux-arm64
-          
-          # macOS builds
-          - goos: darwin
-            goarch: amd64
-            binary_name: pyhub-installer
-            asset_name: pyhub-installer-darwin-amd64
-          - goos: darwin
-            goarch: arm64
-            binary_name: pyhub-installer
-            asset_name: pyhub-installer-darwin-arm64
-          
-          # Windows builds
-          - goos: windows
-            goarch: amd64
-            binary_name: pyhub-installer.exe
-            asset_name: pyhub-installer-windows-amd64
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-        run: |
-          go build -v -ldflags "-s -w" -o ${{ matrix.binary_name }} ./cmd/pyhub-installer
-
-      - name: Create archive
-        run: |
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            # Create zip for Windows
-            zip -j ${{ matrix.asset_name }}.zip ${{ matrix.binary_name }}
-          else
-            # Create tar.gz for Unix systems
-            tar czf ${{ matrix.asset_name }}.tar.gz ${{ matrix.binary_name }}
-          fi
-
-      - name: Generate SHA256 checksum
-        run: |
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            sha256sum ${{ matrix.asset_name }}.zip > ${{ matrix.asset_name }}.zip.sha256
-          else
-            sha256sum ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
-          fi
-
-      - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         with:
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Release ${{ github.ref_name }}
+            
+            ### Installation
+            
+            #### macOS (Apple Silicon)
+            ```bash
+            curl -L https://github.com/pyhub-kr/pyhub-installer/releases/download/${{ github.ref_name }}/pyhub-installer-darwin-arm64.tar.gz | tar -xz
+            ```
+            
+            #### macOS (Intel)
+            ```bash
+            curl -L https://github.com/pyhub-kr/pyhub-installer/releases/download/${{ github.ref_name }}/pyhub-installer-darwin-amd64.tar.gz | tar -xz
+            ```
+            
+            #### Linux (x64)
+            ```bash
+            curl -L https://github.com/pyhub-kr/pyhub-installer/releases/download/${{ github.ref_name }}/pyhub-installer-linux-amd64.tar.gz | tar -xz
+            ```
+            
+            #### Windows (x64)
+            ```powershell
+            Invoke-WebRequest -Uri "https://github.com/pyhub-kr/pyhub-installer/releases/download/${{ github.ref_name }}/pyhub-installer-windows-amd64.zip" -OutFile "pyhub-installer.zip"
+            Expand-Archive -Path "pyhub-installer.zip" -DestinationPath "."
+            ```
+            
+            ### Checksums
+            All files include `.sha256` checksum files for verification.
           files: |
-            ${{ matrix.asset_name }}*
+            dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
